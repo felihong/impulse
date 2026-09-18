@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 500" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <marker id="fwd" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#1b1e27"/>
+    </marker>
+    <marker id="bck" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8a93a3"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="500" rx="14" fill="#ffffff" stroke="#dde1e9"/>
+
+  <!-- lane headers -->
+  <text x="120" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="0.5">CLIENTS</text>
+  <text x="406" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#2563d8" letter-spacing="0.5">DATABRICKS APP · mcp-impulse-agent</text>
+  <text x="696" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#dd4c11" letter-spacing="0.5">SERVERLESS SPARK ⚡</text>
+  <text x="951" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#17864f" letter-spacing="0.5">UNITY CATALOG DELTA</text>
+
+  <!-- CLIENTS column -->
+  <rect x="20" y="46" width="200" height="300" rx="10" fill="#eef1f5" stroke="#6b7280" stroke-width="1.2"/>
+  <rect x="36" y="62" width="168" height="42" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="48" y="82" font-size="13" font-weight="600" fill="#1b1e27">Genie One</text>
+  <text x="48" y="98" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">custom MCP connection</text>
+  <rect x="36" y="112" width="168" height="42" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="48" y="132" font-size="13" font-weight="600" fill="#1b1e27">AI Playground</text>
+  <text x="48" y="148" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">auto-discovers mcp-*</text>
+  <rect x="36" y="162" width="168" height="42" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="48" y="182" font-size="13" font-weight="600" fill="#1b1e27">3rd-party MCP clients</text>
+  <text x="48" y="198" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">Claude Desktop, Cursor…</text>
+  <text x="120" y="252" text-anchor="middle" font-size="11" fill="#5b6472">Present a workspace</text>
+  <text x="120" y="270" text-anchor="middle" font-size="11" fill="#5b6472">OAuth / Bearer token;</text>
+  <text x="120" y="294" text-anchor="middle" font-size="11" fill="#5b6472">same workspace as the</text>
+  <text x="120" y="312" text-anchor="middle" font-size="11" fill="#5b6472">app (for Genie One)</text>
+
+  <!-- APP column -->
+  <rect x="296" y="46" width="220" height="300" rx="10" fill="#eef1f5" stroke="#2563d8" stroke-width="1.4"/>
+  <rect x="310" y="62" width="192" height="34" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="322" y="83" font-size="12" font-weight="600" fill="#1b1e27">FastMCP · JSON-RPC dispatch</text>
+  <rect x="310" y="104" width="192" height="34" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="322" y="125" font-size="12" font-weight="600" fill="#1b1e27">Build Impulse Report / Page</text>
+  <rect x="310" y="146" width="192" height="34" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="322" y="167" font-size="12" font-weight="600" fill="#1b1e27">Expression-tree builder</text>
+  <rect x="310" y="188" width="192" height="34" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="322" y="209" font-size="12" font-weight="600" fill="#1b1e27">Collect small result → JSON</text>
+  <line x1="310" y1="242" x2="502" y2="242" stroke="#dde1e9"/>
+  <text x="406" y="262" text-anchor="middle" font-size="11.5" font-weight="700" fill="#2563d8">Orchestration only</text>
+  <text x="406" y="280" text-anchor="middle" font-size="11" fill="#5b6472">app container CPU —</text>
+  <text x="406" y="296" text-anchor="middle" font-size="11" fill="#5b6472">no data crunching here</text>
+  <text x="406" y="320" text-anchor="middle" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">Python 3.12 · databricks-connect 18.2</text>
+
+  <!-- SERVERLESS column -->
+  <rect x="596" y="46" width="200" height="300" rx="10" fill="#fff5ef" stroke="#dd4c11" stroke-width="2"/>
+  <rect x="610" y="62" width="172" height="46" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="622" y="81" font-size="12" font-weight="600" fill="#1b1e27">TSAL → Python UDFs</text>
+  <text x="622" y="98" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">run on remote workers</text>
+  <rect x="610" y="116" width="172" height="34" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="622" y="137" font-size="12" font-weight="600" fill="#1b1e27">Delta scans + joins</text>
+  <rect x="610" y="158" width="172" height="46" rx="7" fill="#ffffff" stroke="#dde1e9"/>
+  <text x="622" y="177" font-size="12" font-weight="600" fill="#1b1e27">resample · cumtrapz</text>
+  <text x="622" y="194" font-size="12" font-weight="600" fill="#1b1e27">histogram binning · stats</text>
+  <text x="696" y="236" text-anchor="middle" font-size="12.5" font-weight="700" fill="#dd4c11">⚡ ALL heavy compute</text>
+  <text x="696" y="256" text-anchor="middle" font-size="11" fill="#5b6472" font-family="ui-monospace, monospace">DatabricksSession</text>
+  <text x="696" y="271" text-anchor="middle" font-size="11" fill="#5b6472" font-family="ui-monospace, monospace">.builder.serverless()</text>
+  <text x="696" y="295" text-anchor="middle" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">impulse wheel shipped</text>
+  <text x="696" y="310" text-anchor="middle" font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace">via withDependencies</text>
+
+  <!-- STORAGE column -->
+  <rect x="876" y="92" width="150" height="208" rx="10" fill="#eef1f5" stroke="#17864f" stroke-width="1.4"/>
+  <text x="951" y="120" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1b1e27">silver layer</text>
+  <g font-size="10.5" fill="#5b6472" font-family="ui-monospace, monospace" text-anchor="middle">
+    <text x="951" y="148">agent_container_metrics</text>
+    <text x="951" y="166">agent_channel_metrics</text>
+    <text x="951" y="184">agent_channels</text>
+    <text x="951" y="202">agent_container_tags</text>
+    <text x="951" y="220">agent_channel_tags</text>
+  </g>
+  <line x1="892" y1="236" x2="1010" y2="236" stroke="#dde1e9"/>
+  <text x="951" y="256" text-anchor="middle" font-size="11" font-weight="700" fill="#17864f">read-only</text>
+  <text x="951" y="274" text-anchor="middle" font-size="10.5" fill="#5b6472">sinkless — no gold</text>
+  <text x="951" y="289" text-anchor="middle" font-size="10.5" fill="#5b6472">table persisted</text>
+
+  <!-- forward arrows -->
+  <g stroke="#1b1e27" stroke-width="1.8" fill="none" marker-end="url(#fwd)">
+    <line x1="220" y1="150" x2="294" y2="150"/>
+    <line x1="516" y1="150" x2="594" y2="150"/>
+    <line x1="796" y1="150" x2="874" y2="150"/>
+  </g>
+  <g font-family="ui-monospace, monospace" font-size="10" fill="#5b6472" text-anchor="middle">
+    <text x="257" y="138">POST /mcp</text>
+    <text x="257" y="176">Bearer ·</text>
+    <text x="257" y="188">stateless</text>
+    <text x="555" y="130">Databricks</text>
+    <text x="555" y="142">Connect</text>
+    <text x="555" y="176">(Spark</text>
+    <text x="555" y="188">Connect)</text>
+    <text x="835" y="140">reads</text>
+  </g>
+
+  <!-- return ribbon -->
+  <g stroke="#8a93a3" stroke-width="1.6" fill="none" stroke-dasharray="6 4">
+    <path d="M876 382 L620 382 L620 348" marker-end="url(#bck)"/>
+    <path d="M596 402 L406 402 L406 350" marker-end="url(#bck)"/>
+    <path d="M296 422 L120 422 L120 350" marker-end="url(#bck)"/>
+  </g>
+  <g font-family="ui-monospace, monospace" font-size="10" fill="#8a93a3">
+    <text x="700" y="377" text-anchor="middle">rows → Spark DF</text>
+    <text x="472" y="397" text-anchor="middle">toPandas() / collect() — small result</text>
+    <text x="200" y="417" text-anchor="middle">JSON-RPC response, inline</text>
+  </g>
+  <text x="52" y="450" font-size="10.5" fill="#8a93a3" font-family="ui-monospace, monospace">— — —  results flow back</text>
+
+  <!-- no warehouse -->
+  <text x="640" y="452" text-anchor="middle" font-size="12.5" font-weight="700" fill="#c0392b">✕ No SQL warehouse — compute is serverless Spark via Databricks Connect</text>
+  <text x="640" y="482" text-anchor="middle" font-size="10.5" fill="#8a93a3" font-style="italic">a background thread pings SELECT 1 every 120s to keep the serverless session warm</text>
+</svg>

@@ -15,7 +15,18 @@ dependencies = [
     "zstandard>=0.25.0",
     "uvicorn>=0.30.0",
     "starlette>=0.37.0",
+    # Install Impulse itself from the locally built wheel (see build_wheel.sh),
+    # NOT as bundled source. Two reasons: (1) it registers dist-info, so
+    # impulse_query_engine resolves __version__ via importlib.metadata instead
+    # of falling back to reading a repo-root VERSION file that doesn't exist in
+    # the Apps layout (source deploys under <app>/source_code, but that fallback
+    # looks one level above it); (2) it's the same wheel get_spark() ships to
+    # the serverless workers, so app process and workers run identical code.
+    "databricks-impulse",
 ]
+
+[tool.uv.sources]
+databricks-impulse = { path = "wheels/databricks_impulse-0.7.0-py3-none-any.whl" }
 
 [project.scripts]
 mcp-server = "server.main:main"
@@ -26,4 +37,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["server*", "impulse_reporting*", "impulse_query_engine*"]
+include = ["server*"]

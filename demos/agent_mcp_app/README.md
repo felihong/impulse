@@ -5,7 +5,7 @@ queries as agent tools: `list_channels`, `list_containers`,
 `preview_histogram`, `preview_histogram_2d`, `preview_stats`, and
 `preview_point_values`. See `demos/agent_mcp_query` for the notebook this
 was built from, including a full write-up of the design decisions (why not
-Genie/managed MCP, the safety model for virtual-signal expression trees, and
+Genie One / managed MCP, the safety model for virtual-signal expression trees, and
 the latency work that got steady-state calls down to 2-7s).
 
 ## Prerequisites
@@ -16,14 +16,17 @@ the latency work that got steady-state calls down to 2-7s).
 
 ## Setup
 
-1. **Build the wheel** (ships this repo's `impulse_reporting`/
-   `impulse_query_engine` to the remote serverless workers TSAL compiles
-   Python UDFs onto, and to the app's own process):
+1. **Build the wheel** — the app installs this repo's `impulse_reporting`/
+   `impulse_query_engine` as the `databricks-impulse` dependency (see
+   `pyproject.toml`) *and* ships the same wheel to the remote serverless
+   workers TSAL compiles Python UDFs onto:
    ```bash
    ./build_wheel.sh
    ```
-   Re-run this whenever `src/` changes -- it always resyncs from the
-   canonical source, so the bundled copies here never drift.
+   Re-run this whenever `src/` changes. It builds from the repo's canonical
+   `src/`, so the app never drifts from it. (If the repo `VERSION` bumps,
+   update the wheel filename in `pyproject.toml`'s `[tool.uv.sources]` to
+   match the name it prints.)
 
 2. **Configure `app.yaml`**: replace the `CATALOG`/`SCHEMA`/`TABLE_PREFIX`
    placeholders with wherever your silver layer lives.
@@ -31,7 +34,8 @@ the latency work that got steady-state calls down to 2-7s).
 3. **Create and deploy the app**:
    ```bash
    databricks apps create mcp-impulse-agent   # name must start with mcp-
-   databricks sync . /Workspace/Users/<you>/mcp-impulse-agent
+   # the wheel is .gitignored, so force it into the sync with --include
+   databricks sync . /Workspace/Users/<you>/mcp-impulse-agent --include 'wheels/*.whl'
    databricks apps deploy mcp-impulse-agent \
      --source-code-path /Workspace/Users/<you>/mcp-impulse-agent
    ```
@@ -47,6 +51,34 @@ the latency work that got steady-state calls down to 2-7s).
    server in AI Playground (Workspace sidebar → Playground → Tools
    dropdown), since its name starts with `mcp-`.
 
+## Consuming from Genie One
+
+**Genie One** uses this app through a **governed Unity Catalog connection**: register the app as
+an `HTTP` connection with `is_mcp_connection=true` (metastore-level, M2M auth via a dedicated
+service principal that has `CAN_USE` on the app), then add it in Genie One via **+ → More
+connections**. The six tools then appear and Genie One draws on them. Full step-by-step — SP,
+secret, `CAN_USE`, the connection JSON, and tested prompts — is in [`GENIE_ONE.md`](GENIE_ONE.md).
+
+**Genie Code alternative (no UC connection):** in a **Genie Code** session, **Settings → MCP
+Servers → Add Server → Custom MCP servers**, pick `mcp-impulse-agent`, and **Save**. Simpler but
+ungoverned.
+
+Two requirements are already handled by this app:
+
+- **Stateless transport.** Genie One requires the server be stateless, so
+  the server is created with `FastMCP(..., stateless_http=True)` (see
+  `server/main.py`). The `streamable-http` transport still serves the
+  standard `/mcp` endpoint, so AI Playground keeps working.
+- **Same-workspace deploy.** The app must live in the workspace you connect
+  from. If you hit CORS errors, add the workspace URL to the app's allowed
+  origins.
+
+Pair the MCP tools with the Impulse **skills** (`skills/` at the repo root,
+`SKILL.md` format) installed under
+`/Workspace/Users/<you>/.assistant/skills/` so Genie One knows Impulse
+vocabulary (channels, containers, TSAL, events) when composing tool calls.
+See [`GENIE_ONE.md`](GENIE_ONE.md) for the full setup + tested prompts.
+
 ## Implementation notes
 
 - **Dependency pins matter.** `databricks-connect==18.2.*` is required --
@@ -55,11 +87,19 @@ the latency work that got steady-state calls down to 2-7s).
   pin, since its telemetry code reads a private `Config._product_info`
   attribute that only exists on that version. Don't pin `pyspark`/
   `delta-spark` separately -- let `databricks-connect` provide them.
-- **Why the wheel exists at all:** TSAL compiles to Python UDFs that run on
-  remote serverless workers, not in the app's own process, so
-  `impulse_reporting`/`impulse_query_engine` have to be shipped there
-  explicitly via `DatabricksEnv().withDependencies("local:<wheel>")` --
-  see `server/main.py`'s `get_spark()`.
+- **Why the wheel exists at all:** two reasons. (1) TSAL compiles to Python
+  UDFs that run on remote serverless workers, not in the app's own process,
+  so Impulse has to be shipped there explicitly via
+  `DatabricksEnv().withDependencies("local:<wheel>")` -- see
+  `server/main.py`'s `get_spark()`. (2) The app's own process installs the
+  same wheel as the `databricks-impulse` dependency. Installing it (rather
+  than sys.path-referencing bundled source) registers dist-info, so
+  `impulse_query_engine` resolves `__version__` via `importlib.metadata`
+  instead of falling back to reading a repo-root `VERSION` file -- that
+  fallback can't be satisfied in the Databricks Apps layout (source deploys
+  under `<app>/source_code/`, but the fallback looks one level above it),
+  and the first `Report` build would otherwise fail with
+  `FileNotFoundError: '.../VERSION'`.
 - **Latency:** AI Playground enforces a ~55s per-call timeout. Persisting
   results to Delta and reading them back took 33-43s per call -- too slow.
   Reading `report.aggregation_dfs[...]` directly (already in final fact

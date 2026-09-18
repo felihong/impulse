@@ -70,3 +70,26 @@ button {
     margin: 0.5rem 0 0.25rem 0.5rem;
     color: var(--ifm-color-content);
 }
+
+/* In-content images (e.g. UI screenshots) are high-DPI captures that otherwise
+   render at full content width, making their text look oversized. Cap the
+   display width, center them, and add a light frame. Adjust --screenshot-max to
+   taste. */
+:root {
+    --screenshot-max: 560px;
+}
+.markdown img {
+    max-width: var(--screenshot-max);
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 1.25rem auto;
+    border: 1px solid var(--ifm-color-emphasis-200);
+    border-radius: 8px;
+}
+/* The architecture diagram is a self-contained SVG panel: let it render wider
+   than the screenshot cap and drop the extra frame. */
+.markdown img[title="architecture-diagram"] {
+    max-width: 100%;
+    border: none;
+}

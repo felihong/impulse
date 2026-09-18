@@ -1,5 +1,6 @@
 import operator
 import os
+import threading
 import uuid
 from typing import Literal
 
@@ -7,10 +8,11 @@ import pyspark.sql.functions as F
 from mcp.server.fastmcp import FastMCP
 
 _spark = None
+_spark_lock = threading.Lock()
 
 
-def get_spark():
-    """Lazily create a serverless Spark session via Databricks Connect.
+def _build_spark():
+    """Create a fresh serverless Spark session via Databricks Connect.
 
     Impulse's TSAL layer compiles expressions into Python UDFs that run on
     the remote serverless workers, not in this app's own process -- so the
@@ -18,20 +20,40 @@ def get_spark():
     package) has to be shipped to those workers too via a wheel built from
     the same source (see wheels/), referenced through withDependencies.
     """
+    import glob
+    from databricks.connect import DatabricksEnv, DatabricksSession
+    wheels_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wheels")
+    matches = glob.glob(os.path.join(wheels_dir, "databricks_impulse-*.whl"))
+    if not matches:
+        raise RuntimeError(
+            f"No databricks_impulse-*.whl found in {wheels_dir} -- run build_wheel.sh "
+            "(see README) before deploying this app."
+        )
+    env = DatabricksEnv().withDependencies(f"local:{matches[0]}")
+    return DatabricksSession.builder.serverless().withEnvironment(env).getOrCreate()
+
+
+def get_spark():
+    """Return a live serverless Spark session, rebuilding it if the cached one
+    has expired.
+
+    A serverless Spark Connect session does not live forever: after enough idle
+    time or a hard lifetime cap the remote session is torn down, and the cached
+    handle then fails every call with NO_ACTIVE_SESSION. So probe the cached
+    session with a trivial query and rebuild it when the probe fails, instead of
+    handing back a dead handle. The lock keeps concurrent tool calls from racing
+    to build duplicate sessions.
+    """
     global _spark
-    if _spark is None:
-        import glob
-        from databricks.connect import DatabricksEnv, DatabricksSession
-        wheels_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wheels")
-        matches = glob.glob(os.path.join(wheels_dir, "databricks_impulse-*.whl"))
-        if not matches:
-            raise RuntimeError(
-                f"No databricks_impulse-*.whl found in {wheels_dir} -- run build_wheel.sh "
-                "(see README) before deploying this app."
-            )
-        env = DatabricksEnv().withDependencies(f"local:{matches[0]}")
-        _spark = DatabricksSession.builder.serverless().withEnvironment(env).getOrCreate()
-    return _spark
+    with _spark_lock:
+        if _spark is not None:
+            try:
+                _spark.sql("SELECT 1").collect()
+                return _spark
+            except Exception:
+                _spark = None  # stale/expired -- fall through and rebuild
+        _spark = _build_spark()
+        return _spark
 
 
 CATALOG = os.environ["CATALOG"]
@@ -40,7 +62,11 @@ TABLE_PREFIX = os.environ["TABLE_PREFIX"]
 PFX = f"{CATALOG}.{SCHEMA}.{TABLE_PREFIX}"
 
 PORT = int(os.environ.get("DATABRICKS_APP_PORT", "8000"))
-mcp = FastMCP("impulse-agent", host="0.0.0.0", port=PORT)
+# stateless_http=True is required for Genie One / Genie Code custom MCP servers
+# (each tool call is a self-contained request -- no session id is negotiated or
+# stored). The streamable-http transport below still serves the standard /mcp
+# endpoint, so AI Playground discovery keeps working unchanged.
+mcp = FastMCP("impulse-agent", host="0.0.0.0", port=PORT, stateless_http=True)
 
 
 def _adhoc_config() -> dict:
@@ -372,17 +398,13 @@ numerical discrepancy fix in the underlying query engine."""
 # Preview tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-def preview_histogram(
-    bins: list[float],
-    channel_name: str | None = None,
-    tags: dict[str, str] | None = None,
-    signal_expr: dict | None = None,
-    event: dict | None = None,
-    weight: dict | None = None,
-    bins_unit: str | None = None,
-    values_unit: str = "s",
-) -> list[dict]:
+# NOTE: descriptions are built with runtime string concatenation (shared
+# _EXPR_DOC/_EVENT_DOC/_WEIGHT_DOC/_SIGNALS_DOC fragments), so they can't live
+# as a function docstring -- a first-statement string that isn't a pure literal
+# leaves __doc__ = None, and FastMCP would then expose the tool with NO
+# description (which breaks tool selection in Genie One / AI Playground). Hoist
+# each into a constant and pass it via @mcp.tool(description=...).
+_PREVIEW_HISTOGRAM_DESC = (
     """Compute a 1D histogram RIGHT NOW and return the actual numeric result
     -- an instant, read-only preview, not a persisted report aggregation.
     Use this when the user asks a question like "what's the distribution of
@@ -407,6 +429,20 @@ def preview_histogram(
     values_unit are display labels only (e.g. "rpm") -- the returned value is
     always in seconds regardless of values_unit. Returns one row per bin with
     bin_name, lower_bound, and duration_s."""
+)
+
+
+@mcp.tool(description=_PREVIEW_HISTOGRAM_DESC)
+def preview_histogram(
+    bins: list[float],
+    channel_name: str | None = None,
+    tags: dict[str, str] | None = None,
+    signal_expr: dict | None = None,
+    event: dict | None = None,
+    weight: dict | None = None,
+    bins_unit: str | None = None,
+    values_unit: str = "s",
+) -> list[dict]:
     from impulse_reporting.core.page import Page
     from impulse_reporting.aggregations.histogram import HistogramDuration
 
@@ -449,21 +485,7 @@ def preview_histogram(
     return result_df[["bin_name", "lower_bound", "duration_s"]].to_dict(orient="records")
 
 
-@mcp.tool()
-def preview_histogram_2d(
-    x_bins: list[float],
-    y_bins: list[float],
-    x_channel_name: str | None = None,
-    y_channel_name: str | None = None,
-    tags: dict[str, str] | None = None,
-    x_signal_expr: dict | None = None,
-    y_signal_expr: dict | None = None,
-    event: dict | None = None,
-    weight: dict | None = None,
-    x_bins_unit: str | None = None,
-    y_bins_unit: str | None = None,
-    values_unit: str = "s",
-) -> list[dict]:
+_PREVIEW_HISTOGRAM_2D_DESC = (
     """Compute a 2D heatmap of two signals (x vs y) RIGHT NOW and return the
     actual numeric result -- an instant, read-only preview, not a persisted
     report aggregation. Use when the user wants to see how two signals
@@ -484,6 +506,24 @@ def preview_histogram_2d(
     returned value is always in seconds regardless of values_unit. Returns
     one row per (x_bin, y_bin) with x_bin_name, y_bin_name, x_lower_bound,
     y_lower_bound, and duration_s."""
+)
+
+
+@mcp.tool(description=_PREVIEW_HISTOGRAM_2D_DESC)
+def preview_histogram_2d(
+    x_bins: list[float],
+    y_bins: list[float],
+    x_channel_name: str | None = None,
+    y_channel_name: str | None = None,
+    tags: dict[str, str] | None = None,
+    x_signal_expr: dict | None = None,
+    y_signal_expr: dict | None = None,
+    event: dict | None = None,
+    weight: dict | None = None,
+    x_bins_unit: str | None = None,
+    y_bins_unit: str | None = None,
+    values_unit: str = "s",
+) -> list[dict]:
     from impulse_reporting.core.page import Page
     from impulse_reporting.aggregations.histogram2d import Histogram2DDuration
 
@@ -546,12 +586,7 @@ _SIGNALS_DOC = """signals: list of {"label": "...", "channel_name": "...",
 _STATS = {"min", "max", "mean", "median"}
 
 
-@mcp.tool()
-def preview_stats(
-    signals: list[dict],
-    statistics: list[Literal["min", "max", "mean", "median"]] | None = None,
-    event: dict | None = None,
-) -> list[dict]:
+_PREVIEW_STATS_DESC = (
     """Compute summary statistics for one or more signals RIGHT NOW and
     return the actual numeric result -- an instant, read-only preview, not a
     persisted report aggregation. Use for questions like "what's the average
@@ -572,6 +607,15 @@ def preview_stats(
     valid, so each container gets its own row. Returns one row per
     (container_id, label, statistic) with columns container_id, label,
     statistic, value."""
+)
+
+
+@mcp.tool(description=_PREVIEW_STATS_DESC)
+def preview_stats(
+    signals: list[dict],
+    statistics: list[Literal["min", "max", "mean", "median"]] | None = None,
+    event: dict | None = None,
+) -> list[dict]:
     from impulse_reporting.core.page import Page
     from impulse_reporting.aggregations.stats_aggregator import StatsAggregator
 
@@ -616,11 +660,7 @@ def preview_stats(
     return result_df.to_dict(orient="records")
 
 
-@mcp.tool()
-def preview_point_values(
-    signals: list[dict],
-    event: dict,
-) -> list[dict]:
+_PREVIEW_POINT_VALUES_DESC = (
     """Sample one or more signals at each instant of a points-in-time event
     RIGHT NOW and return the actual values -- an instant, read-only preview,
     not a persisted report aggregation. Use for questions like "what was the
@@ -637,6 +677,14 @@ def preview_point_values(
 
     Returns one row per (container_id, event_instance_id, label) with the
     sampled value."""
+)
+
+
+@mcp.tool(description=_PREVIEW_POINT_VALUES_DESC)
+def preview_point_values(
+    signals: list[dict],
+    event: dict,
+) -> list[dict]:
     from impulse_reporting.core.page import Page
     from impulse_reporting.aggregations.point_value_aggregator import PointValueAggregator
 
@@ -680,7 +728,9 @@ def preview_point_values(
 
 def _keep_warm():
     """Ping the serverless session periodically so the underlying compute
-    doesn't scale down from inactivity between questions."""
+    doesn't scale down from inactivity between questions. Because get_spark()
+    now rebuilds an expired session, this also self-heals a dead session even
+    when no tool calls arrive between expiries."""
     import time
     while True:
         try:

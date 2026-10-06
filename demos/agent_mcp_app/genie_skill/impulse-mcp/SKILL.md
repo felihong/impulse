@@ -69,3 +69,25 @@ guessing; the notes below are just orientation.
 1. `list_channels` → confirm "Engine RPM", "Vehicle Speed Sensor" exist and their tags.
 2. `preview_histogram(channel_name="Engine RPM", bins=[0,1000,2000,3000,4000,5000,6000], bins_unit="rpm")`.
 3. Report the dwell-time distribution; if asked "what fraction above 3000", sum the top bins ÷ total.
+
+## Long-running queries — `submit_query` + `poll_query`
+
+The app runs on Databricks Apps, which **cut off any single request at ~120s**. A `preview_*`
+call that scans the whole fleet, uses many fine bins, or spans many channels can exceed that and
+fail. For those, don't call the `preview_*` tool directly — run it asynchronously:
+
+1. **`submit_query(tool, arguments)`** — `tool` is the preview tool name (`"preview_histogram"`,
+   `"preview_histogram_2d"`, `"preview_stats"`, `"preview_point_values"`); `arguments` is the exact
+   kwargs dict that tool takes. Returns `{"job_id", "status": "pending"}` instantly.
+2. **`poll_query(job_id)`** — call every few seconds until `status` is `"done"` (rows are in
+   `result`, same shape the preview tool returns) or `"error"` (reason in `error`). Keep polling
+   through `"pending"`/`"running"`.
+
+Example: `submit_query(tool="preview_histogram", arguments={"channel_name": "Engine RPM",
+"bins": [0,500,1000,1500,2000,2500,3000,3500,4000,4500,5000,5500,6000], "bins_unit": "rpm"})`,
+then `poll_query("<job_id>")` until done.
+
+**Which path?** Use the sync `preview_*` tools for ordinary questions (a second or two). Reach for
+`submit_query`/`poll_query` only when you expect the computation to be slow. Both paths return
+identical result rows — interpret them the same way (see above). The user sees step-level progress
+("Completed: submit_query", "Completed: poll_query") between calls.

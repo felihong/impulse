@@ -10,3 +10,12 @@ env:
     value: "<your-schema>"
   - name: TABLE_PREFIX
     value: "<your-table-prefix>"
+  # Enables the async submit_query/poll_query tools (see README "Long-running
+  # queries"). valueFrom references the app's "postgres" resource -- attach a
+  # Lakebase project under that resource name and the platform resolves this to
+  # the endpoint path. PGHOST/PGPORT/PGDATABASE/PGUSER/PGSSLMODE are then
+  # auto-injected; LAKEBASE_ENDPOINT is the one var that must be declared here.
+  # Omit this block (and the postgres resource) to run without async support --
+  # the sync preview_* tools work regardless.
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres

@@ -13,6 +13,10 @@ dependencies = [
     "pydantic==2.11.7",
     "scipy==1.15.1",
     "zstandard>=0.25.0",
+    # psycopg3 backs the submit_query/poll_query async job store in Lakebase
+    # (see server.main). [binary] ships the libpq C bindings so no system
+    # libpq is needed in the Apps runtime.
+    "psycopg[binary]>=3",
     "uvicorn>=0.30.0",
     "starlette>=0.37.0",
     # Install Impulse itself from the locally built wheel (see build_wheel.sh),

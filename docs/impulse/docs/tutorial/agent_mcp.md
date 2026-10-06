@@ -37,7 +37,7 @@ TSAL event/aggregation per question — there is no way to pre-populate gold tab
 thresholds, bin edges, and virtual signals. So instead of exposing tables, this demo exposes a
 small set of **tools** that construct and run Impulse reports on demand.
 
-## The six tools
+## The tools
 
 Two for discovery, four for computation:
 
@@ -53,6 +53,9 @@ Two for discovery, four for computation:
 The compute tools accept a constrained **expression tree** for virtual signals (whitelisted ops
 and methods — no free-form code) and an **event** spec that scopes the computation to a time
 window or a set of instants. See the tool descriptions themselves for the full grammar.
+
+Two further tools — `submit_query` and `poll_query` — wrap the four compute tools for queries that
+would take too long to answer in a single request. See [Long-running queries](#long-running-queries).
 
 ## Architecture and execution model
 
@@ -91,6 +94,88 @@ Two design points make this work interactively:
 The server is created with `FastMCP(..., stateless_http=True)` and served over
 `streamable-http` at `/mcp`. Statelessness is required for Genie One's MCP client (each tool call
 is self-contained, no session id is negotiated), and AI Playground discovery still works unchanged.
+:::
+
+## Long-running queries {#long-running-queries}
+
+Databricks Apps enforce a **hard ~120-second timeout on every HTTP request**, applied at the
+platform's proxy layer — it is not an idle timeout and is not configurable per app. The `preview_*`
+tools answer **synchronously**, so a single tool call must finish inside that budget or the request
+is cut off.
+
+For ordinary questions on typical data this is a non-issue — warm calls return in a few seconds. It
+only bites at scale: a large fleet (hundreds or thousands of recordings), high-rate signals, finely
+`resample`-d virtual signals, or a large 2D grid can push the serverless computation past 120s, and
+a synchronous call would then fail mid-flight.
+
+:::caution The 120s cap is a hard ceiling
+Streaming the response (SSE, or MCP progress notifications) does **not** extend a single request
+past ~120s — the proxy terminates it regardless. The only way to exceed the limit is to split the
+work across multiple short requests. (Model Serving endpoints allow ~500s; Databricks Apps do not.)
+:::
+
+### submit / poll
+
+Two tools turn one slow computation into several fast requests:
+
+| Tool | Does |
+|------|------|
+| `submit_query(tool, arguments)` | Starts one of the four `preview_*` computations on a background thread and returns a `job_id` immediately (~0.1s). `tool` is the preview tool's name; `arguments` is exactly the keyword arguments that tool takes. |
+| `poll_query(job_id)` | Returns `{status: "pending" \| "running" \| "done" \| "error", …}`; when `done`, `result` holds the same rows the underlying `preview_*` tool would have returned. |
+
+The caller submits once, then polls every few seconds until the job is `done`:
+
+```jsonc
+// submit_query — returns in ~0.15s; the computation continues on a background thread
+submit_query({
+  "tool": "preview_histogram",
+  "arguments": { "channel_name": "Engine RPM", "bins": [0, 1000, 2000, 3000, 4000, 5000, 6000] }
+})
+// → { "job_id": "787c10b0-…", "status": "pending" }
+
+// poll_query — call every few seconds until status is "done" (or "error").
+// Captured against the live app: pending → running → done over ~16 polls / ~53s.
+poll_query({ "job_id": "787c10b0-…" })   // → { "status": "running" }   (polls 1–15)
+poll_query({ "job_id": "787c10b0-…" })   // → { "status": "running" }
+//  …
+poll_query({ "job_id": "787c10b0-…" })   // → { "status": "done", "result": [ … ] }   (poll 16)
+
+// On "done", result holds exactly the rows preview_histogram would have returned:
+// [ { "bin_name": "0.0-1000.0",    "lower_bound": 0,    "duration_s": 2241.60 },
+//   { "bin_name": "1000.0-2000.0", "lower_bound": 1000, "duration_s": 8414.15 },
+//   { "bin_name": "2000.0-3000.0", "lower_bound": 2000, "duration_s": 3296.50 },
+//   { "bin_name": "3000.0-4000.0", "lower_bound": 3000, "duration_s":   76.03 }, … ]
+```
+
+Each `submit`/`poll` round-trip is tiny and finishes far inside the 120s budget, while the actual
+computation runs for as long as it needs on serverless Spark. The job's state lives in a **Lakebase
+(Postgres) table** owned by the app, so it survives between the independent poll requests. The fast
+synchronous `preview_*` tools remain — use those for quick questions and submit/poll only when a
+query is expected to be slow.
+
+:::note No client-native async required
+Genie One has no streaming or async protocol for custom MCP tools — and per the cap above, that
+would not help even if it did. submit/poll works entirely through **ordinary sequential tool
+calls**, so Genie One drives the loop itself: it calls `submit_query`, then calls `poll_query` until
+the job is done, showing step-level progress between calls. The `impulse-mcp` skill steers it onto
+this path for queries it expects to be slow. This is the same kickoff-and-poll pattern Databricks'
+own long-running-agent guidance recommends for staying under the Apps proxy timeout.
+:::
+
+### Enabling it
+
+submit/poll needs a Lakebase project attached to the app as the **`postgres`** resource
+(`CAN_CONNECT_AND_CREATE`), plus a `LAKEBASE_ENDPOINT` entry in `app.yaml` (`valueFrom: postgres`).
+On first start the app creates its own `impulse_mcp.mcp_jobs` table. **Without** a Lakebase resource
+the app still runs and all six synchronous tools work — `submit_query`/`poll_query` just return a
+clear "no Lakebase attached" error. Full setup is in the app's
+[`README.md`](https://github.com/databrickslabs/impulse/blob/main/demos/agent_mcp_app/README.md#long-running-queries-async-submitpoll).
+
+:::note On the bundled demo data
+The demo silver layer is small (three short recordings), so every query — even deliberately heavy
+ones — completes in a few tens of seconds and never actually reaches the 120s cap. submit/poll is
+there for production-scale datasets, where it does. On the demo data the async path still works
+end-to-end; it just finishes quickly.
 :::
 
 ## Step 1 — Run the notebook
@@ -235,9 +320,10 @@ Once the connection exists and shows `is_mcp_connection: true`, add it to a Geni
 With M2M OAuth there's no user login step. Anyone who selects the connection needs `USE CONNECTION`
 on it (granted in 3a).
 
-Opening the connection shows its six tools, each of which you can allow, ask per call, or deny:
+Opening the connection shows its tools, each of which you can allow, ask per call, or deny (the
+screenshot predates the `submit_query`/`poll_query` pair, so it shows the six core tools):
 
-![The six Impulse tools exposed by the connected MCP connection in Genie One](./img/genie-one-connector-tools.png)
+![The core Impulse tools exposed by the connected MCP connection in Genie One](./img/genie-one-connector-tools.png)
 
 :::caution If the MCP option is missing
 The custom-MCP connection only appears when the workspace preview **Third Party Connectors for
@@ -349,3 +435,7 @@ tool-call results captured against a live server — lives alongside the app at
   known upstream numerical issue); the tools raise a clear error rather than return wrong numbers.
 - **Serverless Environment Version.** The notebook needs Environment Version 2+ (Python 3.11+);
   the app is unaffected (it pins Python 3.12 in its own venv).
+- **120s request cap on synchronous tools.** The `preview_*` tools must each finish within the
+  Databricks Apps ~120s request timeout; genuinely long computations go through the
+  [`submit_query`/`poll_query`](#long-running-queries) async path (app-level, backed by Lakebase)
+  rather than client-native streaming, which the platform cap would defeat anyway.

@@ -1,6 +1,7 @@
 import operator
 import os
 import threading
+import time
 import uuid
 from typing import Literal
 
@@ -54,6 +55,90 @@ def get_spark():
                 _spark = None  # stale/expired -- fall through and rebuild
         _spark = _build_spark()
         return _spark
+
+
+# ---------------------------------------------------------------------------
+# Lakebase (Postgres) connection -- backs the async job store (submit/poll)
+# ---------------------------------------------------------------------------
+#
+# This app is deployed with a Lakebase "postgres" resource, so the platform
+# injects PGHOST/PGPORT/PGDATABASE/PGUSER/PGSSLMODE/LAKEBASE_ENDPOINT at runtime
+# (Lakebase connectivity Pattern 4). The DB password is a short-lived (1h) OAuth
+# token minted from LAKEBASE_ENDPOINT, so we cache it and re-mint well before
+# expiry. Connections are opened per operation (submit, each status write, each
+# poll) rather than pooled: traffic is light and short-lived connections sidestep
+# both token rotation and the stale-handle problem after a scale-to-zero wake.
+_PG_SCHEMA = "impulse_mcp"
+_PG_TOKEN_TTL = 2400  # re-mint ~40 min in, comfortably before the 1h token expiry
+_pg_token = None
+_pg_token_exp = 0.0
+_pg_token_lock = threading.Lock()
+
+
+def _async_enabled() -> bool:
+    """True when a Lakebase resource is attached (async submit/poll usable)."""
+    return bool(os.environ.get("LAKEBASE_ENDPOINT"))
+
+
+def _pg_credential() -> str:
+    """Return a live Lakebase OAuth token, re-minting it before it expires."""
+    global _pg_token, _pg_token_exp
+    with _pg_token_lock:
+        now = time.time()
+        if _pg_token is None or now >= _pg_token_exp:
+            from databricks.sdk import WorkspaceClient
+            _pg_token = WorkspaceClient().postgres.generate_database_credential(
+                endpoint=os.environ["LAKEBASE_ENDPOINT"]
+            ).token
+            _pg_token_exp = now + _PG_TOKEN_TTL
+        return _pg_token
+
+
+def _pg_connect():
+    """Open a fresh Lakebase connection, retrying the ~100ms scale-to-zero wake."""
+    import psycopg
+    last_err = None
+    for attempt in range(3):
+        try:
+            return psycopg.connect(
+                host=os.environ["PGHOST"],
+                port=int(os.environ.get("PGPORT", "5432")),
+                dbname=os.environ["PGDATABASE"],
+                user=os.environ["PGUSER"],
+                password=_pg_credential(),
+                sslmode=os.environ.get("PGSSLMODE", "require"),
+                connect_timeout=30,
+            )
+        except psycopg.OperationalError as e:
+            last_err = e  # transient: scale-to-zero wake or token just rotated
+            time.sleep(0.5 * (attempt + 1))
+    raise last_err
+
+
+def _init_jobs_table():
+    """Create the app-owned schema + job table on startup (idempotent).
+
+    The app's service principal has CAN_CONNECT_AND_CREATE, so it creates and
+    thereby owns this schema -- which is why the app must be deployed before any
+    local dev touches the same branch (see the databricks-lakebase skill).
+    """
+    with _pg_connect() as conn, conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_PG_SCHEMA}")
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {_PG_SCHEMA}.mcp_jobs (
+                job_id      uuid PRIMARY KEY,
+                tool        text NOT NULL,
+                params      jsonb NOT NULL,
+                status      text NOT NULL DEFAULT 'pending',
+                result      jsonb,
+                error       text,
+                created_at  timestamptz NOT NULL DEFAULT now(),
+                updated_at  timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        conn.commit()
 
 
 CATALOG = os.environ["CATALOG"]
@@ -726,12 +811,147 @@ def preview_point_values(
     return result_df.to_dict(orient="records")
 
 
+# ---------------------------------------------------------------------------
+# Long-running async queries (submit/poll) backed by Lakebase
+# ---------------------------------------------------------------------------
+#
+# Databricks Apps terminate any HTTP request that runs past ~120s, and Genie One
+# has no client-native async/streaming for custom MCP tools. So for queries that
+# might exceed that budget we expose an app-level async protocol: submit_query
+# writes a job row and runs the compute on a background thread, returning a
+# job_id in milliseconds; poll_query reads that row until the job is done. Every
+# individual HTTP call stays well under the timeout. The fast synchronous
+# preview_* tools above are unchanged -- use those for quick questions and this
+# pair only when a query is expected to be slow (many fine bins, many channels,
+# whole-fleet scans).
+
+_ASYNC_TOOLS = {
+    "preview_histogram": preview_histogram,
+    "preview_histogram_2d": preview_histogram_2d,
+    "preview_stats": preview_stats,
+    "preview_point_values": preview_point_values,
+}
+
+
+def _update_job(job_id: str, status: str, result=None, error: str | None = None):
+    """Write a job's terminal/intermediate state. Best-effort: a failed write
+    leaves the row in its prior state and the poller simply keeps waiting."""
+    try:
+        with _pg_connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE {_PG_SCHEMA}.mcp_jobs "
+                "SET status=%s, result=%s, error=%s, updated_at=now() WHERE job_id=%s",
+                (status, result, error, job_id),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def _run_job(job_id: str, tool: str, arguments: dict):
+    """Background worker: run one preview_* computation and record its outcome."""
+    from psycopg.types.json import Jsonb
+    _update_job(job_id, "running")
+    fn = _ASYNC_TOOLS[tool]
+    try:
+        result = fn(**arguments)
+        _update_job(job_id, "done", result=Jsonb(result))
+    except Exception as e:  # surfaced to the caller through poll_query
+        _update_job(job_id, "error", error=f"{type(e).__name__}: {e}")
+
+
+_SUBMIT_QUERY_DESC = (
+    """Run one of the preview_* computations ASYNCHRONOUSLY, returning a job_id
+    immediately instead of waiting for the result inline. Use this INSTEAD of
+    calling preview_histogram / preview_histogram_2d / preview_stats /
+    preview_point_values directly WHENEVER a query might run longer than ~a
+    minute -- e.g. a histogram over many fine bins, statistics across many
+    channels, or any aggregation spanning the whole fleet of recordings.
+    Databricks Apps cut any single request off at ~120s, so a slow synchronous
+    call would fail; this splits the work across a fast submit plus one or more
+    quick polls.
+
+    tool: which computation to run -- one of "preview_histogram",
+    "preview_histogram_2d", "preview_stats", "preview_point_values".
+    arguments: a dict of exactly the keyword arguments that tool takes -- read
+    that tool's own description for its parameter contract (bins, signal_expr,
+    event, weight, ...). Example: {"tool": "preview_histogram", "arguments":
+    {"channel_name": "Engine RPM", "bins": [0, 1000, 2000, 3000],
+    "bins_unit": "rpm"}}.
+
+    Returns {"job_id": "...", "status": "pending"} right away. Then call
+    poll_query(job_id) every few seconds until status is "done" (result
+    attached) or "error". For a question you expect to answer in a second or
+    two, skip this and call the preview_* tool directly."""
+)
+
+
+@mcp.tool(description=_SUBMIT_QUERY_DESC)
+def submit_query(tool: str, arguments: dict) -> dict:
+    import inspect
+    from psycopg.types.json import Jsonb
+
+    if not _async_enabled():
+        raise RuntimeError(
+            "Async queries are unavailable: this app has no Lakebase (postgres) "
+            "resource attached. Call the preview_* tools directly instead."
+        )
+    fn = _ASYNC_TOOLS.get(tool)
+    if fn is None:
+        raise ValueError(f"Unknown tool {tool!r}; must be one of {sorted(_ASYNC_TOOLS)}")
+    try:
+        inspect.signature(fn).bind(**arguments)  # fail fast on malformed arguments
+    except TypeError as e:
+        raise ValueError(f"arguments do not match {tool}'s signature: {e}")
+
+    job_id = str(uuid.uuid4())
+    with _pg_connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {_PG_SCHEMA}.mcp_jobs (job_id, tool, params, status) "
+            "VALUES (%s, %s, %s, 'pending')",
+            (job_id, tool, Jsonb(arguments)),
+        )
+        conn.commit()
+    threading.Thread(target=_run_job, args=(job_id, tool, arguments), daemon=True).start()
+    return {"job_id": job_id, "status": "pending"}
+
+
+_POLL_QUERY_DESC = (
+    """Check on an async query started with submit_query -- pass the job_id it
+    returned. Returns {"status": "pending"|"running"|"done"|"error", ...}: when
+    status is "done" the "result" field holds the same rows the underlying
+    preview_* tool would have returned; when "error" the "error" field explains
+    what failed. While status is "pending" or "running", wait a few seconds and
+    poll again; keep polling until you get "done" or "error"."""
+)
+
+
+@mcp.tool(description=_POLL_QUERY_DESC)
+def poll_query(job_id: str) -> dict:
+    if not _async_enabled():
+        raise RuntimeError("Async queries are unavailable (no Lakebase resource attached).")
+    with _pg_connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT status, result, error FROM {_PG_SCHEMA}.mcp_jobs WHERE job_id=%s",
+            (job_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise ValueError(f"No such job_id {job_id!r}")
+    status, result, error = row
+    out = {"job_id": job_id, "status": status}
+    if status == "done":
+        out["result"] = result  # psycopg returns jsonb already parsed to list[dict]
+    elif status == "error":
+        out["error"] = error
+    return out
+
+
 def _keep_warm():
     """Ping the serverless session periodically so the underlying compute
     doesn't scale down from inactivity between questions. Because get_spark()
     now rebuilds an expired session, this also self-heals a dead session even
     when no tool calls arrive between expiries."""
-    import time
     while True:
         try:
             get_spark().sql("SELECT 1").collect()
@@ -742,6 +962,13 @@ def _keep_warm():
 
 def main():
     import threading
+    if _async_enabled():
+        try:
+            _init_jobs_table()
+        except Exception as e:
+            # Don't block startup on Lakebase: the sync preview_* tools still
+            # work; submit_query/poll_query will report the failure if called.
+            print(f"[impulse-mcp] WARNING: could not init Lakebase jobs table: {e}", flush=True)
     threading.Thread(target=_keep_warm, daemon=True).start()
     mcp.run(transport="streamable-http")
 

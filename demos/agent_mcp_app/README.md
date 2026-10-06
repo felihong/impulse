@@ -3,7 +3,9 @@
 A custom MCP server, hosted as a Databricks App, exposing ad-hoc Impulse
 queries as agent tools: `list_channels`, `list_containers`,
 `preview_histogram`, `preview_histogram_2d`, `preview_stats`, and
-`preview_point_values`. See `demos/agent_mcp_query` for the notebook this
+`preview_point_values`, plus `submit_query`/`poll_query` for running any of
+those preview computations asynchronously when they'd exceed the Apps request
+timeout (see "Long-running queries" below). See `demos/agent_mcp_query` for the notebook this
 was built from, including a full write-up of the design decisions (why not
 Genie One / managed MCP, the safety model for virtual-signal expression trees, and
 the latency work that got steady-state calls down to 2-7s).
@@ -56,7 +58,7 @@ the latency work that got steady-state calls down to 2-7s).
 **Genie One** uses this app through a **governed Unity Catalog connection**: register the app as
 an `HTTP` connection with `is_mcp_connection=true` (metastore-level, M2M auth via a dedicated
 service principal that has `CAN_USE` on the app), then add it in Genie One via **+ → More
-connections**. The six tools then appear and Genie One draws on them. Full step-by-step — SP,
+connections**. The tools then appear and Genie One draws on them. Full step-by-step — SP,
 secret, `CAN_USE`, the connection JSON, and tested prompts — is in [`GENIE_ONE.md`](GENIE_ONE.md).
 
 **Genie Code alternative (no UC connection):** in a **Genie Code** session, **Settings → MCP
@@ -78,6 +80,44 @@ Pair the MCP tools with the Impulse **skills** (`skills/` at the repo root,
 `/Workspace/Users/<you>/.assistant/skills/` so Genie One knows Impulse
 vocabulary (channels, containers, TSAL, events) when composing tool calls.
 See [`GENIE_ONE.md`](GENIE_ONE.md) for the full setup + tested prompts.
+
+## Long-running queries (async submit/poll)
+
+Databricks Apps terminate any HTTP request that runs past **~120s** (a platform
+limit that can't be raised), and Genie One has no client-native async or
+streaming for custom MCP tools. So a slow `preview_*` call — many fine bins,
+many channels, a whole-fleet scan — would be cut off mid-flight. The
+`submit_query`/`poll_query` pair works around this entirely in the app: a job
+row is written to Lakebase, the computation runs on a background thread, and
+each HTTP call (submit, poll) returns in well under the timeout. The `impulse-mcp`
+Genie skill steers Genie One to drive the submit→poll loop; it reports
+step-level progress between calls.
+
+To enable it, attach a **Lakebase (Autoscaling Postgres) project** to the app as
+a `postgres` resource with `CAN_CONNECT_AND_CREATE`:
+
+```bash
+# 1. Create (or reuse) a Lakebase project
+databricks postgres create-project impulse-mcp-jobs \
+  --json '{"spec": {"display_name": "Impulse MCP async jobs"}}' --profile <PROFILE>
+
+# 2. Resolve branch + database resource paths
+databricks postgres list-branches  projects/impulse-mcp-jobs --profile <PROFILE>
+databricks postgres list-databases projects/impulse-mcp-jobs/branches/<BRANCH> --profile <PROFILE>
+
+# 3. Merge a "postgres" resource into the app (read current resources first so the
+#    update_mask=resources replace doesn't detach existing ones), then DEPLOY so the
+#    app's SP creates and OWNS the impulse_mcp schema (see databricks-lakebase skill):
+databricks apps create-update mcp-impulse-agent --json @update.json --profile <PROFILE>
+databricks apps deploy mcp-impulse-agent --source-code-path <path> --profile <PROFILE>
+```
+
+The platform then injects `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGSSLMODE`/
+`LAKEBASE_ENDPOINT`; the app mints a short-lived OAuth token from
+`LAKEBASE_ENDPOINT` and creates the `impulse_mcp.mcp_jobs` table on first start
+(connectivity Pattern 4). **Without a Lakebase resource** the app still runs and
+all six sync tools work — `submit_query`/`poll_query` just return a clear "no
+Lakebase resource attached" error.
 
 ## Implementation notes
 

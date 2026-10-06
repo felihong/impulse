@@ -163,6 +163,17 @@ pattern Databricks' own long-running-agent guidance recommends for staying under
 timeout.
 :::
 
+Here is that loop in a live Genie One session. Asked to run the query asynchronously, Genie One
+grounds with `list_channels`, calls `submit_query` (getting back a job id), then calls `poll_query`
+repeatedly while the job is still running:
+
+![Genie One's thought process: loading the impulse skill, list_channels, submit_query returning a job id, then repeated poll_query calls while the job is still running](./img/genie-one-long-running-polling.png "genie-one-long-running-polling")
+
+When the job finishes, the final `poll_query` returns the result and Genie One renders it — here the
+duration-weighted Engine RPM histogram — having driven the whole submit → poll → done loop itself:
+
+![Genie One's final answer: a note that the query was submitted via submit_query and polled through four poll_query calls (pending to done), with a rendered duration-weighted Engine RPM histogram](./img/genie-one-long-running-result.png "genie-one-long-running-result")
+
 ### Enabling it
 
 submit/poll needs a Lakebase project attached to the app as the **`postgres`** resource

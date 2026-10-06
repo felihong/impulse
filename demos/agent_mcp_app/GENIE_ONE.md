@@ -207,15 +207,6 @@ databricks workspace import-dir skills \
   /Workspace/Users/<you>/.assistant/skills --profile fevm-hongzhu --overwrite
 ```
 
-Optionally also install the MCP-consumption bridge skill in this demo
-(`demos/agent_mcp_app/genie_skill/impulse-mcp/`), which tells Genie One to *prefer the MCP tools*
-for ad-hoc questions rather than hand-writing Impulse Python:
-
-```bash
-databricks workspace import-dir demos/agent_mcp_app/genie_skill \
-  /Workspace/Users/<you>/.assistant/skills --profile fevm-hongzhu --overwrite
-```
-
 Genie One picks skills up on next use; they're on by default and can be toggled on the
 customization page. Confirm with: *"List the Impulse skills you can use."*
 

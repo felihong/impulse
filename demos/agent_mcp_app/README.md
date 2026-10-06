@@ -89,9 +89,9 @@ streaming for custom MCP tools. So a slow `preview_*` call — many fine bins,
 many channels, a whole-fleet scan — would be cut off mid-flight. The
 `submit_query`/`poll_query` pair works around this entirely in the app: a job
 row is written to Lakebase, the computation runs on a background thread, and
-each HTTP call (submit, poll) returns in well under the timeout. The `impulse-mcp`
-Genie skill steers Genie One to drive the submit→poll loop; it reports
-step-level progress between calls.
+each HTTP call (submit, poll) returns in well under the timeout. The `submit_query`
+tool description tells Genie One to drive the submit→poll loop for slow queries; it
+reports step-level progress between calls.
 
 To enable it, attach a **Lakebase (Autoscaling Postgres) project** to the app as
 a `postgres` resource with `CAN_CONNECT_AND_CREATE`:

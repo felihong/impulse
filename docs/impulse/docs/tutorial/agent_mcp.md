@@ -157,9 +157,10 @@ query is expected to be slow.
 Genie One has no streaming or async protocol for custom MCP tools — and per the cap above, that
 would not help even if it did. submit/poll works entirely through **ordinary sequential tool
 calls**, so Genie One drives the loop itself: it calls `submit_query`, then calls `poll_query` until
-the job is done, showing step-level progress between calls. The `impulse-mcp` skill steers it onto
-this path for queries it expects to be slow. This is the same kickoff-and-poll pattern Databricks'
-own long-running-agent guidance recommends for staying under the Apps proxy timeout.
+the job is done, showing step-level progress between calls. The `submit_query` tool description
+tells it to take this path for queries it expects to be slow. This is the same kickoff-and-poll
+pattern Databricks' own long-running-agent guidance recommends for staying under the Apps proxy
+timeout.
 :::
 
 ### Enabling it
@@ -374,9 +375,8 @@ The ten skills:
 | `impulse-ml` | turning recordings into an ML feature matrix |
 
 Most cover Impulse's Python API broadly; combined with the MCP connection, Genie One applies that
-knowledge to drive the tools. The demo also ships a bridge skill
-([`genie_skill/impulse-mcp`](https://github.com/databrickslabs/impulse/blob/main/demos/agent_mcp_app/genie_skill/impulse-mcp/SKILL.md))
-that tells Genie One to prefer the MCP tools over hand-writing Impulse Python for ad-hoc questions.
+knowledge to drive the tools. The MCP tools' own descriptions carry the rest — when to use each one,
+the expression/event grammar, and when to switch to the async `submit_query`/`poll_query` path.
 
 ### 3d. Call it in natural language
 

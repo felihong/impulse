@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Ad-hoc agent queries via MCP | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Ad-hoc agent queries via MCP | Impulse"><meta data-rh="true" name="description" content="Ask questions about your measurement data in plain language and get real numbers back — with no"><meta data-rh="true" property="og:description" content="Ask questions about your measurement data in plain language and get real numbers back — with no"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Tutorials","item":"https://databrickslabs.github.io/impulse/docs/tutorial"},{"@type":"ListItem","position":2,"name":"Agent / MCP (Genie One)","item":"https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.25c0cc1c.css">
-<script src="/impulse/assets/js/runtime~main.d279a387.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.4ffc152f.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.0c76c7f3.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.fc11313f.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -141,10 +141,7 @@ library that runs Spark code against remote Databricks compute from an external 
 <p>Two design points make this work interactively:</p>
 <ul>
 <li class=""><strong>Sinkless.</strong> The tools read <code>report.aggregation_dfs[...]</code> directly (already in final fact
-schema) instead of persisting a gold table and reading it back. Persisting measured 33–43s per
-call — over AI Playground&#x27;s ~55s timeout — while the sinkless path plus skipping the extra
-Unity Catalog round trips brings warm calls to ~2–11s. Cold start of the serverless session is
-~50s on the first compute call.</li>
+schema) instead of persisting a gold table and reading it back.</li>
 <li class=""><strong>The Impulse wheel is shipped to the workers.</strong> Because TSAL runs as Python UDFs on the
 serverless workers, <code>get_spark()</code> attaches the Impulse wheel via
 <code>DatabricksEnv().withDependencies(&quot;local:&lt;wheel&gt;&quot;)</code>, so the app process and the workers run
@@ -164,7 +161,7 @@ only bites at scale: a large fleet (hundreds or thousands of recordings), high-r
 a synchronous call would then fail mid-flight.</p>
 <div class="theme-admonition theme-admonition-caution admonition_xJq3 alert alert--warning"><div class="admonitionHeading_Gvgb"><span class="admonitionIcon_Rf37"><svg viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path></svg></span>The 120s cap is a hard ceiling</div><div class="admonitionContent_BuS1"><p>Streaming the response (SSE, or MCP progress notifications) does <strong>not</strong> extend a single request
 past ~120s — the proxy terminates it regardless. The only way to exceed the limit is to split the
-work across multiple short requests. (Model Serving endpoints allow ~500s; Databricks Apps do not.)</p></div></div>
+work across multiple short requests.</p></div></div>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="submit--poll">submit / poll<a href="#submit--poll" class="hash-link" aria-label="Direct link to submit / poll" title="Direct link to submit / poll" translate="no">​</a></h3>
 <p>Two tools turn one slow computation into several fast requests:</p>
 
@@ -185,8 +182,48 @@ work across multiple short requests. (Model Serving endpoints allow ~500s; Datab
 
 
 <table><thead><tr><th>Tool</th><th>Does</th></tr></thead><tbody><tr><td><code>submit_query(tool, arguments)</code></td><td>Starts one of the four <code>preview_*</code> computations on a background thread and returns a <code>job_id</code> immediately (~0.1s). <code>tool</code> is the preview tool&#x27;s name; <code>arguments</code> is exactly the keyword arguments that tool takes.</td></tr><tr><td><code>poll_query(job_id)</code></td><td>Returns <code>{status: &quot;pending&quot; | &quot;running&quot; | &quot;done&quot; | &quot;error&quot;, …}</code>; when <code>done</code>, <code>result</code> holds the same rows the underlying <code>preview_*</code> tool would have returned.</td></tr></tbody></table>
-<p>The caller submits once, then polls every few seconds until the job is <code>done</code>:</p>
-<div class="language-jsonc codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-jsonc codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// submit_query — returns in ~0.15s; the computation continues on a background thread</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">submit_query({</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  &quot;tool&quot;: &quot;preview_histogram&quot;,</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  &quot;arguments&quot;: { &quot;channel_name&quot;: &quot;Engine RPM&quot;, &quot;bins&quot;: [0, 1000, 2000, 3000, 4000, 5000, 6000] }</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">})</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// → { &quot;job_id&quot;: &quot;787c10b0-…&quot;, &quot;status&quot;: &quot;pending&quot; }</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain" style="display:inline-block"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// poll_query — call every few seconds until status is &quot;done&quot; (or &quot;error&quot;).</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// Captured against the live app: pending → running → done over ~16 polls / ~53s.</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">poll_query({ &quot;job_id&quot;: &quot;787c10b0-…&quot; })   // → { &quot;status&quot;: &quot;running&quot; }   (polls 1–15)</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">poll_query({ &quot;job_id&quot;: &quot;787c10b0-…&quot; })   // → { &quot;status&quot;: &quot;running&quot; }</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">//  …</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">poll_query({ &quot;job_id&quot;: &quot;787c10b0-…&quot; })   // → { &quot;status&quot;: &quot;done&quot;, &quot;result&quot;: [ … ] }   (poll 16)</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain" style="display:inline-block"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// On &quot;done&quot;, result holds exactly the rows preview_histogram would have returned:</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// [ { &quot;bin_name&quot;: &quot;0.0-1000.0&quot;,    &quot;lower_bound&quot;: 0,    &quot;duration_s&quot;: 2241.60 },</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">//   { &quot;bin_name&quot;: &quot;1000.0-2000.0&quot;, &quot;lower_bound&quot;: 1000, &quot;duration_s&quot;: 8414.15 },</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">//   { &quot;bin_name&quot;: &quot;2000.0-3000.0&quot;, &quot;lower_bound&quot;: 2000, &quot;duration_s&quot;: 3296.50 },</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">//   { &quot;bin_name&quot;: &quot;3000.0-4000.0&quot;, &quot;lower_bound&quot;: 3000, &quot;duration_s&quot;:   76.03 }, … ]</span><br></span></code></pre></div></div>
+<p>The caller submits once, then polls every few seconds until the job flips from <code>running</code> to
+<code>done</code>. Here is a real run captured against the live app — one submit, then ~16 polls over ~53s:</p>
+<!-- -->
+<p>The calls themselves are ordinary tool calls:</p>
+<div class="language-jsonc codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(220, 13%, 18%);--prism-color:hsl(220, 14%, 71%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-jsonc codeBlock_bY9V thin-scrollbar" style="background-color:hsl(220, 13%, 18%);color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">submit_query({</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  &quot;tool&quot;: &quot;preview_histogram&quot;,</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">  &quot;arguments&quot;: { &quot;channel_name&quot;: &quot;Engine RPM&quot;, &quot;bins&quot;: [0, 1000, 2000, 3000, 4000, 5000, 6000] }</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">})</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// → { &quot;job_id&quot;: &quot;787c10b0-…&quot;, &quot;status&quot;: &quot;pending&quot; }</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain" style="display:inline-block"></span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">poll_query({ &quot;job_id&quot;: &quot;787c10b0-…&quot; })</span><br></span><span class="token-line" style="color:hsl(220, 14%, 71%);text-shadow:0 1px rgba(0, 0, 0, 0.3)"><span class="token plain">// → { &quot;status&quot;: &quot;running&quot; }   → … →   { &quot;status&quot;: &quot;done&quot;, &quot;result&quot;: [ … ] }</span><br></span></code></pre></div></div>
+<p>When <code>done</code>, <code>result</code> holds exactly the rows <code>preview_histogram</code> would have returned inline:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th><code>bin_name</code></th><th style="text-align:right"><code>lower_bound</code></th><th style="text-align:right"><code>duration_s</code></th></tr></thead><tbody><tr><td><code>0.0-1000.0</code></td><td style="text-align:right">0</td><td style="text-align:right">2241.60</td></tr><tr><td><code>1000.0-2000.0</code></td><td style="text-align:right">1000</td><td style="text-align:right">8414.15</td></tr><tr><td><code>2000.0-3000.0</code></td><td style="text-align:right">2000</td><td style="text-align:right">3296.50</td></tr><tr><td><code>3000.0-4000.0</code></td><td style="text-align:right">3000</td><td style="text-align:right">76.03</td></tr><tr><td>…</td><td style="text-align:right"></td><td style="text-align:right"></td></tr></tbody></table>
 <p>Each <code>submit</code>/<code>poll</code> round-trip is tiny and finishes far inside the 120s budget, while the actual
 computation runs for as long as it needs on serverless Spark. The job&#x27;s state lives in a <strong>Lakebase
 (Postgres) table</strong> owned by the app, so it survives between the independent poll requests. The fast

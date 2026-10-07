@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.9.2">
 <title data-rh="true">Ad-hoc agent queries via MCP | Impulse</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" name="twitter:image" content="https://databrickslabs.github.io/impulse/img/impulse_icon.svg"><meta data-rh="true" property="og:url" content="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Ad-hoc agent queries via MCP | Impulse"><meta data-rh="true" name="description" content="Ask questions about your measurement data in plain language and get real numbers back — with no"><meta data-rh="true" property="og:description" content="Ask questions about your measurement data in plain language and get real numbers back — with no"><link data-rh="true" rel="icon" href="/impulse/img/impulse_icon.svg"><link data-rh="true" rel="canonical" href="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp" hreflang="en"><link data-rh="true" rel="alternate" href="https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Tutorials","item":"https://databrickslabs.github.io/impulse/docs/tutorial"},{"@type":"ListItem","position":2,"name":"Agent / MCP (Genie One)","item":"https://databrickslabs.github.io/impulse/docs/tutorial/agent_mcp"}]}</script><link rel="stylesheet" href="/impulse/assets/css/styles.25c0cc1c.css">
-<script src="/impulse/assets/js/runtime~main.53e4bac8.js" defer="defer"></script>
-<script src="/impulse/assets/js/main.b1c9fa89.js" defer="defer"></script>
+<script src="/impulse/assets/js/runtime~main.9f11de8e.js" defer="defer"></script>
+<script src="/impulse/assets/js/main.1833d572.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -27,8 +27,6 @@ and runs a TSAL report on the fly, and returns the answer inline. For example:</
 <li class=""><strong><a href="https://github.com/felihong/impulse/blob/feature/add-agent-mcp-query/demos/agent_mcp_query.ipynb" target="_blank" rel="noopener noreferrer" class=""><code>demos/agent_mcp_query.ipynb</code></a></strong> — a notebook that defines the tools and exercises them through an in-process MCP client, so you can see the whole flow <strong>without Genie One or any deployment</strong> first.</li>
 <li class=""><strong><a href="https://github.com/felihong/impulse/tree/feature/add-agent-mcp-query/demos/agent_mcp_app" target="_blank" rel="noopener noreferrer" class=""><code>demos/agent_mcp_app/</code></a></strong> — the same tools packaged as a deployable MCP server (a Databricks App) for Genie One and other clients to connect to.</li>
 </ul>
-<p>New to Genie One? It&#x27;s Databricks&#x27; conversational-analytics experience — the next section,
-<a href="#what-is-genie-one" class="">What is Genie One?</a>, gives the one-paragraph version.</p>
 <p>This is the complement to the <a class="" href="/impulse/docs/tutorial/demo">Reporting walkthrough</a>: reporting persists a fixed star
 schema for known questions; this pattern computes one-off answers for questions you didn&#x27;t know in
 advance.</p>
@@ -48,7 +46,8 @@ TSAL event/aggregation per question — there is no way to pre-populate gold tab
 thresholds, bin edges, and virtual signals. So instead of exposing tables, this demo exposes a
 small set of <strong>tools</strong> that construct and run Impulse reports on demand.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="the-tools">The tools<a href="#the-tools" class="hash-link" aria-label="Direct link to The tools" title="Direct link to The tools" translate="no">​</a></h2>
-<p>Two for discovery, four for computation:</p>
+<p>Eight tools — two for discovery, four for computation, and two for running the compute tools
+asynchronously:</p>
 
 
 
@@ -82,12 +81,21 @@ small set of <strong>tools</strong> that construct and run Impulse reports on de
 
 
 
-<table><thead><tr><th>Tool</th><th>Answers</th></tr></thead><tbody><tr><td><code>list_channels</code></td><td>What channels exist, and their tag vocabulary (brand, model, unit, …)</td></tr><tr><td><code>list_containers</code></td><td>What recordings exist, and their tags (vehicle, route, condition, …)</td></tr><tr><td><code>preview_histogram</code></td><td>1D duration-weighted distribution of a signal or virtual signal</td></tr><tr><td><code>preview_histogram_2d</code></td><td>2D heatmap of two signals</td></tr><tr><td><code>preview_stats</code></td><td>min / max / mean / median across one or more signals</td></tr><tr><td><code>preview_point_values</code></td><td>signal values sampled at discrete instants (e.g. each threshold crossing)</td></tr></tbody></table>
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Tool</th><th>Answers</th></tr></thead><tbody><tr><td><code>list_channels</code></td><td>What channels exist, and their tag vocabulary (brand, model, unit, …)</td></tr><tr><td><code>list_containers</code></td><td>What recordings exist, and their tags (vehicle, route, condition, …)</td></tr><tr><td><code>preview_histogram</code></td><td>1D duration-weighted distribution of a signal or virtual signal</td></tr><tr><td><code>preview_histogram_2d</code></td><td>2D heatmap of two signals</td></tr><tr><td><code>preview_stats</code></td><td>min / max / mean / median across one or more signals</td></tr><tr><td><code>preview_point_values</code></td><td>signal values sampled at discrete instants (e.g. each threshold crossing)</td></tr><tr><td><code>submit_query</code></td><td>Run one of the four compute tools asynchronously, returning a <code>job_id</code> right away</td></tr><tr><td><code>poll_query</code></td><td>Fetch an async job&#x27;s status and result by its <code>job_id</code></td></tr></tbody></table>
 <p>The compute tools accept a constrained <strong>expression tree</strong> for virtual signals (whitelisted ops
 and methods — no free-form code) and an <strong>event</strong> spec that scopes the computation to a time
 window or a set of instants. See the tool descriptions themselves for the full grammar.</p>
-<p>Two further tools — <code>submit_query</code> and <code>poll_query</code> — wrap the four compute tools for queries that
-would take too long to answer in a single request. See <a href="#long-running-queries" class="">Long-running queries</a>.</p>
+<p><code>submit_query</code> and <code>poll_query</code> exist because Databricks Apps cut off any request after ~120s — use
+them for the four compute tools when a query is expected to run longer. See
+<a href="#long-running-queries" class="">Long-running queries</a> for the full pattern.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="architecture-and-execution-model">Architecture and execution model<a href="#architecture-and-execution-model" class="hash-link" aria-label="Direct link to Architecture and execution model" title="Direct link to Architecture and execution model" translate="no">​</a></h2>
 <p>The important thing to understand before deploying: <strong>the MCP server does almost no computation
 itself.</strong> It is a thin FastMCP process that builds an Impulse <code>Report</code> and delegates the actual
